@@ -1,0 +1,52 @@
+# Dual-export variant of config.yaml: same redaction pipeline, fanning out
+# to both Phoenix (engineering/eval plane) and Datadog (production
+# observability plane, matching the org's existing platform) — same trace,
+# two lenses, one collector config block. Selected automatically by
+# docker-compose.yml's otel-collector entrypoint only when DD_API_KEY is
+# actually set; otherwise config.yaml (Phoenix-only) runs instead, since the
+# datadog exporter refuses to start at all with an empty API key.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+  redaction:
+    allow_all_keys: true
+    blocked_values:
+      - '(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}'  # email addresses
+      - '(?i)sk-[a-zA-Z0-9_-]{16,}'                    # API-key-shaped secrets
+      - '\b\d{3}-\d{2}-\d{4}\b'                        # SSN-shaped
+    summary: info
+
+  attributes/strip_content:
+    actions:
+      - key: gen_ai.input.messages
+        action: delete
+      - key: gen_ai.output.messages
+        action: delete
+      - key: gen_ai.system_instructions
+        action: delete
+
+exporters:
+  otlp/phoenix:
+    endpoint: phoenix:4317
+    tls:
+      insecure: true
+
+  datadog:
+    api:
+      key: ${env:DD_API_KEY}
+      site: ${env:DD_SITE}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [redaction, attributes/strip_content, batch]
+      exporters: [otlp/phoenix, datadog]

@@ -1,0 +1,69 @@
+# OTel Collector config: PII redaction (the second half of the double-guard
+# — the first half is disabling content capture at the source, see
+# harness/telemetry/otel.py:configure_telemetry / HARNESS_OTEL_INCLUDE_CONTENT
+# in .env) ahead of export to Phoenix (the engineering/eval plane).
+#
+# This is the Phoenix-only variant, used whenever DD_API_KEY is unset (the
+# default/local case) — see config.datadog.yaml for the dual-export variant
+# and docker-compose.yml for how the collector container picks between them
+# at startup. They can't just both be exporters in one static config: the
+# `datadog` exporter validates its API key at collector *startup* and
+# refuses to boot at all with an empty key (verified — it's not a graceful
+# per-export failure), so an empty-key config isn't safely "idle", it's a
+# crash loop.
+#
+# Requires the `-contrib` collector image: the `redaction` processor doesn't
+# exist in the base otel/opentelemetry-collector image.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+  # Redacts PII-shaped values wherever they appear (tool args/results, any
+  # content attribute that slipped through with include_content=True in a
+  # debug run). allow_all_keys=true: this is a values-scrubber, not a
+  # key-allowlist — an allowlist would need updating every time GenAI
+  # semconv adds an attribute, which is a losing game while the convention
+  # is still "Development" status upstream.
+  redaction:
+    allow_all_keys: true
+    blocked_values:
+      - '(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}'  # email addresses
+      - '(?i)sk-[a-zA-Z0-9_-]{16,}'                    # API-key-shaped secrets (Anthropic/OpenAI-style)
+      - '\b\d{3}-\d{2}-\d{4}\b'                        # SSN-shaped
+    summary: info
+
+  # Belt-and-suspenders: drop full conversation content attributes outright,
+  # even redacted, since redaction only scrubs matched substrings and a
+  # production deployment shouldn't export raw prompts/completions to an
+  # external vendor (Datadog) regardless. Phoenix (self-hosted, engineering
+  # plane) is the intended place to inspect real content — enable
+  # HARNESS_OTEL_INCLUDE_CONTENT for that locally rather than relying on spans
+  # that reached this collector.
+  attributes/strip_content:
+    actions:
+      - key: gen_ai.input.messages
+        action: delete
+      - key: gen_ai.output.messages
+        action: delete
+      - key: gen_ai.system_instructions
+        action: delete
+
+exporters:
+  otlp/phoenix:
+    endpoint: phoenix:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [redaction, attributes/strip_content, batch]
+      exporters: [otlp/phoenix]

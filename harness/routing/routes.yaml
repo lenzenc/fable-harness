@@ -1,0 +1,31 @@
+# Versioned route definitions — the tier-1 embedding router matches an
+# incoming request against these utterance sets. Adding an intent means
+# adding an entry here; it never touches core/loop.py.
+routes:
+  - name: small_talk
+    mode: direct
+    target: "Hi! I'm the fable-harness demo agent — ask me something and I'll route it to a tool-using flow."
+    utterances:
+      - "hi"
+      - "hello"
+      - "hey there"
+      - "good morning"
+      - "how are you"
+
+  - name: current_time
+    mode: tool_loop
+    target: single_agent
+    utterances:
+      - "what time is it"
+      - "what's the current time"
+      - "tell me today's date"
+      - "what day is it today"
+
+  - name: advisor_prep
+    mode: flow
+    target: orchestrator
+    utterances:
+      - "prep me for my meeting with client X"
+      - "pull together everything on this account before my call"
+      - "summarize the client's history ahead of our meeting"
+      - "get me up to speed on this advisor relationship"

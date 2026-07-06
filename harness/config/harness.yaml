@@ -1,0 +1,46 @@
+# Harness policy config — versioned in git, distinct from .env (secrets /
+# deployment-specific values, see harness/config/settings.py:Settings).
+# Every ablation flag here has a matching per-run override in RunContext.
+
+budgets:
+  default:
+    max_total_tokens: 20000
+    max_tool_calls: 8
+    max_wall_clock_seconds: 60
+    max_cost_usd: 0.50
+  advisor_prep:
+    max_total_tokens: 60000
+    max_tool_calls: 20
+    max_wall_clock_seconds: 180
+    max_cost_usd: 2.00
+
+compaction_threshold: 0.75
+
+# Risk-tiered tool permission matrix. read_only is the only tier auto-allowed
+# by default for a financial-services deployment; everything else requires
+# an approval gate (core/permissions.py fails closed if none is wired up).
+risk_matrix:
+  read_only: auto_allow
+  writes_internal: auto_allow
+  financial: require_approval
+  destructive: require_approval
+
+# semantic-router's own per-model default for text-embedding-3-small — a
+# principled starting point, not yet empirically re-verified against this
+# project's routes. Re-run harness/evals/test_router.py after any encoder
+# change and tune from its printed `misses` (utterance/expected/confidence)
+# if accuracy dips below the eval's floor.
+routing_confidence_threshold: 0.3
+
+# USD per 1K tokens — used only for the cost budget dimension, which
+# Pydantic AI's native UsageLimits does not track.
+pricing:
+  "anthropic:claude-opus-4-8":
+    input_per_1k: 0.015
+    output_per_1k: 0.075
+  "anthropic:claude-sonnet-5":
+    input_per_1k: 0.003
+    output_per_1k: 0.015
+  "anthropic:claude-haiku-4-5-20251001":
+    input_per_1k: 0.001
+    output_per_1k: 0.005

@@ -1,0 +1,9 @@
+{"utterance": "hi there", "expected_mode": "direct"}
+{"utterance": "hello", "expected_mode": "direct"}
+{"utterance": "good morning!", "expected_mode": "direct"}
+{"utterance": "what time is it right now", "expected_mode": "tool_loop", "expected_target": "single_agent"}
+{"utterance": "can you tell me today's date", "expected_mode": "tool_loop", "expected_target": "single_agent"}
+{"utterance": "what day of the week is it", "expected_mode": "tool_loop", "expected_target": "single_agent"}
+{"utterance": "prep me for my meeting with client X", "expected_mode": "flow", "expected_target": "orchestrator"}
+{"utterance": "pull together the account history before my call", "expected_mode": "flow", "expected_target": "orchestrator"}
+{"utterance": "get me up to speed on this client relationship", "expected_mode": "flow", "expected_target": "orchestrator"}

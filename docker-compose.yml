@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: harness
+      POSTGRES_PASSWORD: harness
+      POSTGRES_DB: harness
+    ports:
+      - "5433:5432"   # host 5432 is commonly already taken by another local postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./harness/memory/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harness -d harness"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    restart: unless-stopped
+    ports:
+      - "6006:6006"   # UI + OTLP-HTTP
+      - "4317:4317"   # OTLP-gRPC (phoenix's own receiver, used if collector is bypassed)
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    volumes:
+      - phoenixdata:/mnt/data
+
+  # Default collector: Phoenix-only export. Runs on a plain `docker compose up`.
+  #
+  # There is no single config that dual-exports-or-idles based on whether
+  # DD_API_KEY is set: the datadog exporter validates its API key at
+  # collector *startup* and refuses to boot at all if it's empty (verified —
+  # not a graceful per-export failure). A shell-conditional entrypoint also
+  # doesn't work here — otelcol-contrib is a scratch-based image with no
+  # /bin/sh (verified). So dual-export is a separate opt-in service below,
+  # gated by a Compose profile instead.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./harness/telemetry/collector/config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4318:4317"   # OTLP-gRPC in from the app (host:container, avoids clashing with phoenix's 4317)
+      - "4319:4318"   # OTLP-HTTP in from the app
+    depends_on:
+      - phoenix
+
+  # Dual-export collector (Phoenix + Datadog): opt-in only. Set DD_API_KEY in
+  # .env, then run:  docker compose --profile datadog up -d otel-collector-datadog otel-collector
+  # (stop the plain otel-collector first — both bind host ports 4318/4319).
+  otel-collector-datadog:
+    image: otel/opentelemetry-collector-contrib:latest
+    restart: unless-stopped
+    profiles: ["datadog"]
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./harness/telemetry/collector/config.datadog.yaml:/etc/otel-collector-config.yaml:ro
+    environment:
+      # Soft default, not a required (`:?`) substitution: Compose interpolates
+      # every service's variables at parse time regardless of which profiles
+      # are active (verified), so a `:?` here would break a plain
+      # `docker compose up` even though this service never starts by default.
+      # If DD_API_KEY is genuinely empty when this profile is activated, the
+      # datadog exporter fails at collector startup with its own clear error.
+      DD_API_KEY: ${DD_API_KEY:-}
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+    ports:
+      - "4318:4317"
+      - "4319:4318"
+    depends_on:
+      - phoenix
+
+volumes:
+  pgdata:
+  phoenixdata:
